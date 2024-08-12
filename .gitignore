@@ -1,3 +1,7 @@
 # files
 Manifest.toml
 Project.toml
+
+# Folders
+plots/*
+M0_results/*

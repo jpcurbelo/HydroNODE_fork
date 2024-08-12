@@ -107,6 +107,9 @@ end
 
 function train_model(pred_NODE, p_init, target_data, target_time; optmzr = ADAM(0.01), max_N_iter = 75)
 
+  epoch = 0  # Initialize epoch counter
+  callback_freq = 10  # Frequency of callback function
+
   function prep_pred_model(time_batch)
       (p) -> pred_NODE(p, time_batch)[1]
   end
@@ -117,10 +120,14 @@ function train_model(pred_NODE, p_init, target_data, target_time; optmzr = ADAM(
       -NSE(pred_NN_model_fct(p),target_data)
   end
 
-  callback = function (p,l)
-      println("NSE: "*string(-l))
-      return false
-  end
+  callback = function (p, l)
+    epoch += 1  # Increment epoch counter
+    # Call the callback every N epochs (and at epoch 1)
+    if epoch % callback_freq == 0 || epoch == 1
+        println("Epoch $epoch - NSE: "*string(-l))
+    end
+    return false
+end
 
   optf = Optimization.OptimizationFunction((θ, p) -> loss_model(θ), Optimization.AutoZygote())
   optprob = Optimization.OptimizationProblem(optf, p_init)
