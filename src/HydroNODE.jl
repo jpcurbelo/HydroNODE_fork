@@ -36,7 +36,8 @@ Random.seed!(123)
 
 # set data directory
 project_path = joinpath(pwd(), "..")
-data_path = joinpath(pwd(),"basin_dataset_public_v1p2")
+# data_path = joinpath(pwd(),"basin_dataset_public_v1p2")
+data_path = joinpath(pwd(),"../../../../gladwell/hydrology/SUMMA/summa-ml-models/CAMELS_US")
 
 # choose model M50 or M100 or full
 chosen_model_id = "M100"
@@ -45,11 +46,15 @@ chosen_model_id = "M100"
 basin_id = "01013500"
 
 # define training and testing period
-train_start_date = Date(1980,10,01)
-train_stop_date = Date(1981,09,30)
-test_start_date = Date(1981,10,01)
-test_stop_date = Date(2010,09,30)
+# train_start_date = Date(1980,10,01)
+# train_stop_date = Date(1981,09,30)
+# test_start_date = Date(1981,10,01)
+# test_stop_date = Date(2010,09,30)
 
+train_start_date = Date(1980,10,01)
+train_stop_date = Date(2000,09,30)
+test_start_date = Date(2000,10,01)
+test_stop_date = Date(2010,09,30)
 
 # if `false`, read the bucket model (M0) parameters from "bucket_opt_init.csv"
 train_bucket_model = false
@@ -166,6 +171,11 @@ else
     p_bucket_precalib = p_all_opt_bucket[3:8]
 end
 @info "... complete!"
+
+println("Press Enter to continue...")
+readline()
+
+
 
 Q_bucket, S_bucket  = basic_bucket_incl_states([S_bucket_precalib..., p_bucket_precalib...], train_timepoints)
 

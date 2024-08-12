@@ -10,7 +10,7 @@ Code repo for publication at https://hess.copernicus.org/articles/26/5085/2022/.
 ### Installation
 Install [Julia](https://julialang.org/downloads/)
 
-All required packages are installed automatically in a seperate environment (see https://pkgdocs.julialang.org/v1/toml-files/) when `HydroNODE_main.jl` is executed for the first time.
+All required packages are installed automatically in a seperate environment (see https://pkgdocs.julialang.org/v1/toml-files/) when `HydroNODE.jl` is executed for the first time.
 
 ### Data
 - download `CAMELS time series meteorology, observed flow, meta data (.zip)` from https://ral.ucar.edu/solutions/products/camels
