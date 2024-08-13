@@ -4,5 +4,5 @@ Project.toml
 
 # Folders
 plots/*
-M0_results/*
+M0_results*/*
 M100_results*/*

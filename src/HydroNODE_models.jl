@@ -68,6 +68,9 @@ function basic_bucket_incl_states(p_, t_out)
 
     sol = solve(prob, BS3(), u0 = p_[1:2], p=p_[3:end], saveat=t_out, reltol=1e-3, abstol=1e-3, sensealg= ForwardDiffSensitivity())
 
+    # # # Try Euler method
+    # # sol = solve(prob, Euler(), u0 = p_[1:2], p=p_[3:end], saveat=t_out, reltol=1e-3, abstol=1e-3, dt=1.0)
+
     Qb_ = Qb.(sol[2,:], p_[3], p_[4], p_[5])
     Qs_ = Qs.(sol[2,:], p_[4])
 
