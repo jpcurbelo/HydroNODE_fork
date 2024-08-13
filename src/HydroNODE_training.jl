@@ -105,10 +105,9 @@ function pretrain_NNs_for_bucket_processes(chosen_model_id, NNs_in_fct, p_NNs_in
 end
 
 
-function train_model(pred_NODE, p_init, target_data, target_time; optmzr = ADAM(0.01), max_N_iter = 75)
+function train_model(pred_NODE, p_init, target_data, target_time; optmzr = ADAM(0.01), max_N_iter = 75, callback_freq = 1)
 
   epoch = 0  # Initialize epoch counter
-  callback_freq = 20  # Frequency of callback function
 
   function prep_pred_model(time_batch)
       (p) -> pred_NODE(p, time_batch)[1]
@@ -123,7 +122,8 @@ function train_model(pred_NODE, p_init, target_data, target_time; optmzr = ADAM(
   callback = function (p, l) 
     # Call the callback every N epochs (and at epoch 1)
     if epoch % callback_freq == 0 || epoch == 0
-        println("Epoch $epoch - NSE: "*string(-l))
+        # println("Epoch $epoch | NSE: "*string(-l))
+        println("Epoch $epoch | NSE (train): $(Printf.@sprintf("%.5f", -l))")
     end
     epoch += 1  # Increment epoch counter
     # println("NSE: "*string(-l))
