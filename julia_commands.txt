@@ -1,1 +1,10 @@
 julia> include("src/HydroNODE.jl")
+
+
+### Set number of Number of Threads
+#Before running Julia
+1) julia -t 128
+or set the JULIA_NUM_THREADS environment variable:
+2) export JULIA_NUM_THREADS=128
+
+julia > Threads.nthreads() 

@@ -1,4 +1,5 @@
 # --------------------------------------------------
+# HydroNODE.jl
 # Neural ODE models in Hydrology
 # - load data
 # - build models
@@ -9,12 +10,14 @@
 
 # Starting project from within
 cd(@__DIR__)
-using Pkg; Pkg.activate(".."); Pkg.instantiate()
+## Uncomment this to run this module - it was commented out to run the parallel version HydroNODE_train_multiple.jl
+# using Pkg; Pkg.activate(".."); Pkg.instantiate()
 
 using Revise
 
 using DataFrames, Dates, Statistics
 using DelimitedFiles, CSV
+using FilePathsBase
 
 using OrdinaryDiffEq, DiffEqFlux, Lux
 using ComponentArrays

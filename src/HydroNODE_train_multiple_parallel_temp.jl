@@ -2,24 +2,16 @@
 # Jesus Perez Curbelo - Aug. 2024
 # --------------------------------------------------
 
-
 # Starting project from within
 cd(@__DIR__)
 using Pkg; Pkg.activate(".."); Pkg.instantiate()
-
-# # Add the required package
-# Pkg.add("FilePathsBase")
 
 @time using Revise
 
 @time using DataFrames, Dates, Statistics
 @time using DelimitedFiles, CSV
-@time using FilePathsBase
 
 @time using OrdinaryDiffEq, DiffEqFlux, Lux
-@time using OrdinaryDiffEq
-@time using DiffEqFlux
-@time using Lux
 @time using ComponentArrays
 @time using SciMLSensitivity
 
@@ -34,41 +26,42 @@ using Pkg; Pkg.activate(".."); Pkg.instantiate()
 @time Random.seed!(123)
 
 @time using Printf
-# @time using Base.Threads
 
-# # # Define a constant for the number of threads
-# # const NUM_THREADS = 4  # or any number you desire
+@info "Loading packages complete ..."
 
-@info "Loading packages complete"
+# ----------------------------------------------------------
+# Add distributed processing
+using Distributed
+addprocs(4)  # Add N worker processes, adjust based on your available cores
 
-# ===========================================================
-# USER INPUT:
+# Ensure that all worker processes use the correct environment
+@everywhere using Pkg
+@everywhere Pkg.activate("..")  # Adjust path if necessary
+# @everywhere Pkg.instantiate()
 
-# set data directory
+# Load required modules on all workers
+@everywhere using Dates
+@everywhere using Revise
+@everywhere using Printf
+
+# Broadcast important variables early
 project_path = joinpath(pwd(), "..")
-# data_path = joinpath(pwd(),"basin_dataset_public_v1p2")
-data_path = joinpath(pwd(),"../../../../gladwell/hydrology/SUMMA/summa-ml-models/CAMELS_US")
-# data_path = joinpath(pwd(),"../../CAMELS_US")
-
-# choose model M50 or M100 or full
+data_path = joinpath(pwd(), "../../../../gladwell/hydrology/SUMMA/summa-ml-models/CAMELS_US")
 chosen_model_id = "M100"
 
-# choose basin id
-# Load the basin list from ../param_set_files
-# basin_file_name = "569_basin_file.txt"
-# basin_file_name = "569_basin_file_16f.txt"
-# basin_file_name = "569_basin_file_3f.txt"
-basin_file_name = "2_basin_file.txt"
+# Broadcast these to all workers immediately after they are defined
+@everywhere project_path = $project_path
+@everywhere data_path = $data_path
+@everywhere chosen_model_id = $chosen_model_id
+
+# Load basin list file and broadcast
+basin_file_name = "569_basin_file_16f.txt"
 basin_file = joinpath(project_path, "param_set_files", basin_file_name)
 basin_list = readlines(basin_file)
-# println(basin_list)
+@everywhere basin_list = $basin_list
 
-# Results directory names
-# m0_folder = "M0_results_569basins_1980_2010_BS3_julia"
-# m0_folder = "M0_results_16basins"
-# m0_folder = "M0_results_3basins"
-m0_folder = "M0_results_2basin"
-
+# Directory setup for M0 results
+m0_folder = "M0_results_16basins"
 m0_outputs_path = joinpath(project_path, m0_folder)
 if !isdir(m0_outputs_path)
     mkdir(m0_outputs_path)
@@ -78,16 +71,18 @@ if !isdir(m0_results_path)
     mkdir(m0_results_path)
 end
 
-# Define the maximum number of iterations and the callback frequency for the training 
-MAX_N_ITER = 2
-CALLBACK_FREQ = 1
-LR_TRAIN = 0.0001  # Hoge value is 0.0001
+# # Define global variables
+# MAX_N_ITER = 5
+# CALLBACK_FREQ = 1
+# LR_TRAIN = 0.001  # Learning rate for training
 
-# m100_folder = "$(chosen_model_id)_results_569basins_1980_2010_BS3_julia_$(MAX_N_ITER)ep"
-# m100_folder = "$(chosen_model_id)_results_16basins"
-# m100_folder = "$(chosen_model_id)_results_3basins"
-m100_folder = "$(chosen_model_id)_results_2basin_$(MAX_N_ITER)ep_lr4"
+# Broadcast the variables to all workers
+@everywhere MAX_N_ITER = 5
+@everywhere CALLBACK_FREQ = 1
+@everywhere LR_TRAIN = 0.001  # Learning rate for training
 
+# Directory setup for M100 model results
+m100_folder = "$(chosen_model_id)_results_16basins_$(MAX_N_ITER)ep_lr3_parallel"
 m100_outputs_path = joinpath(project_path, m100_folder)
 if !isdir(m100_outputs_path)
     mkdir(m100_outputs_path)
@@ -97,91 +92,53 @@ if !isdir(m100_results_path)
     mkdir(m100_results_path)
 end
 
-# define training and testing period
-train_start_date = Date(1995,10,01)
-train_stop_date = Date(2000,09,30)
-test_start_date = Date(2000,10,01)
-test_stop_date = Date(2005,09,30)
-
-# train_start_date = Date(1980,10,01)
-# train_stop_date = Date(2000,09,30)
-# test_start_date = Date(2000,10,01)
-# test_stop_date = Date(2010,09,30)
+# Broadcast remaining variables to all workers
+@everywhere train_start_date = Date(1980,10,01)
+@everywhere train_stop_date = Date(2000,09,30)
+@everywhere test_start_date = Date(2000,10,01)
+@everywhere test_stop_date = Date(2010,09,30)
 
 # ===========================================================
-includet("HydroNODE_data.jl")
-includet("HydroNODE_models.jl")
-includet("HydroNODE_training.jl")
+
+# Include custom modules on all worker processes
+@everywhere includet("HydroNODE_data.jl")
+@everywhere includet("HydroNODE_models.jl")
+@everywhere includet("HydroNODE_training.jl")
+
+@info "Setting modules for distributed processing complete ..."
 
 # -------------------------------------------------------
 # Objective function: Nash-Sutcliffe Efficiency
 
-NSE(pred, obs) = 1 - sum((pred .- obs).^2) / sum((obs .- mean(obs)).^2)
+@everywhere NSE(pred, obs) = 1 - sum((pred .- obs).^2) / sum((obs .- mean(obs)).^2)
 
-function NSE_loss(pred_model, params, batch, time_batch)
-
+@everywhere function NSE_loss(pred_model, params, batch, time_batch)
     pred, = pred_model(params, time_batch)
-    loss = -NSE(pred,batch)
-
+    loss = -NSE(pred, batch)
     return loss, pred
 end
 
-# Helper function to generate a versioned file name
-function get_versioned_filename(filepath::AbstractString)
-    @info "Generating versioned file name for $filepath"
-
-    dir = dirname(filepath)
-    # ext = Base.extname(filepath)  # Corrected to Base.extname
-    ext = split(filepath, ".")[end]
-    # base = basename(filepath, ext)
-    base = basename(filepath)
-    # Drop the extension from the base name
-    base = split(base, ".")[1]
-
-    # Find the numerical suffix (e.g., "batch1") and split it from the rest of the name
-    m = match(r"^(.*_batch)(\d+)$", base)
-    if m !== nothing
-        base_part, number_part = m.captures
-        number = parse(Int, number_part)
-    else
-        # If no suffix exists, start at batch1
-        base_part = base
-        number = 1
-    end
-
-    # Generate versioned file name
-    while true
-        versioned_filename = joinpath(dir, "$(base_part)$(number)$(ext)")
-        if isfile(versioned_filename)
-            number += 1
-        else
-            filepath = versioned_filename
-            break
-        end
-    end
-
-    return filepath
-end
-
-
 # Struct to store basin metrics
-struct BasinMetrics
+@everywhere struct BasinMetrics
     basin_id::String
     NSE_train::Float32
     NSE_test::Float32
 end
-basin_metrics_list_m0 = []
-basin_metrics_list_pretrainer = []
-basin_metrics_list_m100 = []
-##################################################
 
-USING_BATCH = true
+# Initialize lists to store metrics
+@everywhere basin_metrics_list_m0 = []
+@everywhere basin_metrics_list_pretrainer = []
+@everywhere basin_metrics_list_m100 = []
+
 # -------------------------------------------------------
 # Loop over basins
-for basin_id in basin_list[1:2]
+# for basin_id in basin_list
+# Distributed loop over basins
+@distributed for basin_id in basin_list
 
     println("="^80)
     println("Basin: ", basin_id)
+    println("="^80)
 
     # -------------------------------------------------------
     # Load and preprocess data
@@ -196,44 +153,25 @@ for basin_id in basin_list[1:2]
     select!(df, Not(Symbol("Tmax(C)")));
     select!(df, Not(Symbol("Tmin(C)")));
 
-    # adjust start and stop date if necessary
-    global train_start_date, test_stop_date
-    if df[1, "Date"] != train_start_date
-        train_start_date = maximum([df[1, "Date"],train_start_date])
+    # Adjust start and stop date if necessary
+    train_start_date_local, test_stop_date_local = train_start_date, test_stop_date
+    if df[1, "Date"] != train_start_date_local
+        train_start_date_local = maximum([df[1, "Date"], train_start_date_local])
     end
-
-    if df[end, "Date"] != test_stop_date
-        test_stop_date = minimum([df[end, "Date"], test_stop_date])
+    if df[end, "Date"] != test_stop_date_local
+        test_stop_date_local = minimum([df[end, "Date"], test_stop_date_local])
     end
 
     # Preparing Training and Testing Data
-    # format data
     data_x, data_y, data_timepoints,
     train_x, train_y, train_timepoints, 
     test_x, test_y, test_timepoints = prepare_data(df,
-    (train_start_date, train_stop_date, test_start_date, test_stop_date),input_var_names,output_var_name)
-
-    # normalize data
-    norm_moments_in = [mean(data_x, dims=1); std(data_x, dims = 1)]
-
-    global norm_P, norm_T
-    norm_P = prep_norm(norm_moments_in[:,2])
-    norm_T = prep_norm(norm_moments_in[:,3])
-
-    # -------------------------------------------------------
-    # interpolation
-
-    itp_method = SteffenMonotonicInterpolation()
-
-    global itp_Lday, itp_P, itp_T
-    itp_Lday = interpolate(data_timepoints, data_x[:,1], itp_method)
-    itp_P = interpolate(data_timepoints, data_x[:,2], itp_method)
-    itp_T = interpolate(data_timepoints, data_x[:,3], itp_method)
+    (train_start_date_local, train_stop_date, test_start_date, test_stop_date_local), input_var_names, output_var_name)
 
     # ===============================================================
     # Bucket model training and full model preparation
-    NSE_loss_bucket_w_states(p) =  NSE_loss(basic_bucket_incl_states, p, train_y, train_timepoints)[1]
 
+    NSE_loss_bucket_w_states(p) =  NSE_loss(basic_bucket_incl_states, p, train_y, train_timepoints)[1]
     NSE_loss_bucket_w_states_test(p) =  NSE_loss(basic_bucket_incl_states, p, test_y, test_timepoints)[1]
 
     @info "Bucket model parameters - loading..."
@@ -307,7 +245,23 @@ for basin_id in basin_list[1:2]
     # ===============================================================
     # Neural ODE models
 
-    global norm_S0, norm_S1
+    # -------------------------------------------------------
+    # Pretraining
+    # -------------------------------------------------------
+
+    # # # normalize data
+    # # norm_moments_in = [mean(data_x, dims=1); std(data_x, dims = 1)]
+
+    # # global norm_P, norm_T
+    # # norm_P = prep_norm(norm_moments_in[:,2])
+    # # norm_T = prep_norm(norm_moments_in[:,3])
+
+    # Normalize data
+    norm_moments_in = [mean(data_x, dims=1); std(data_x, dims=1)]
+    norm_P = prep_norm(norm_moments_in[:,2])
+    norm_T = prep_norm(norm_moments_in[:,3])
+
+    # global norm_S0, norm_S1
     norm_S0 = prep_norm([mean(S_bucket[1,:]), std(S_bucket[1,:])])
     norm_S1 = prep_norm([mean(S_bucket[2,:]), std(S_bucket[2,:])])
 
@@ -320,7 +274,16 @@ for basin_id in basin_list[1:2]
     T_bucket_    = train_x[:,3]
 
     NN_input = [norm_S0.(S0_bucket_) norm_S1.(S1_bucket_) norm_P.(P_bucket_) norm_T.(T_bucket_)]
-   
+
+    # S0_bucket_test_ = S_bucket_test[1,:]
+    # S1_bucket_test_ = S_bucket_test[2,:]
+    # Lday_bucket_test_ = test_x[:,1]
+    # P_bucket_test_    = test_x[:,2]
+    # T_bucket_test_    = test_x[:,3]
+
+    # NN_input_test = [norm_S0.(S0_bucket_test_) norm_S1.(S1_bucket_test_) norm_P.(P_bucket_test_) norm_T.(T_bucket_test_)]
+
+    
     @info "NN pre-training..."
     start_time_pretrain = time_ns()
 
@@ -346,95 +309,109 @@ for basin_id in basin_list[1:2]
     # Store the basin metrics in the basin_metrics_list_pretrainer
     push!(basin_metrics_list_pretrainer, BasinMetrics(basin_id, NSE_init_NODE, NSE_init_NODE_test))
 
-    # -------------
-    # training
+    # -------------------------------------------------------
+    # Pretraining
+    # -------------------------------------------------------
 
-    @info "Neural ODE model training..."
-    start_time_train = time_ns()
+    # # Interpolation
 
-    p_opt_NODE = train_model(pred_NODE_model, p_NN_init, train_y, train_timepoints; optmzr = ADAM(LR_TRAIN), max_N_iter = MAX_N_ITER, callback_freq = CALLBACK_FREQ)
+    # itp_method = SteffenMonotonicInterpolation()
+    # # global itp_Lday, itp_P, itp_T
+    # itp_Lday = interpolate(data_timepoints, data_x[:,1], itp_method)
+    # itp_P = interpolate(data_timepoints, data_x[:,2], itp_method)
+    # itp_T = interpolate(data_timepoints, data_x[:,3], itp_method)
+
+
+
+    # @info "Neural ODE model training..."
+    # start_time_train = time_ns()
+
+    # p_opt_NODE = train_model(pred_NODE_model, p_NN_init, train_y, train_timepoints; optmzr = ADAM(LR_TRAIN), max_N_iter = MAX_N_ITER, callback_freq = CALLBACK_FREQ)
     
-    elapsed_time_ns_train = time_ns() - start_time_train
-    elapsed_time_s_train = elapsed_time_ns_train / 1e9  # Convert nanoseconds to seconds
-    @info "... completed in $(Printf.@sprintf("%.2f", elapsed_time_s_train)) s"
+    # elapsed_time_ns_train = time_ns() - start_time_train
+    # elapsed_time_s_train = elapsed_time_ns_train / 1e9  # Convert nanoseconds to seconds
+    # @info "... completed in $(Printf.@sprintf("%.2f", elapsed_time_s_train)) s"
 
 
-    Q_NODE_train = pred_NODE_model(p_opt_NODE, train_timepoints)
-    Q_sim_train = Q_NODE_train[1]
-    Q_NODE_test = pred_NODE_model(p_opt_NODE, test_timepoints)
-    Q_sim_test = Q_NODE_test[1]
+    # Q_NODE_train = pred_NODE_model(p_opt_NODE, train_timepoints)
+    # Q_sim_train = Q_NODE_train[1]
+    # Q_NODE_test = pred_NODE_model(p_opt_NODE, test_timepoints)
+    # Q_sim_test = Q_NODE_test[1]
 
-    # Save the model results for the Neural ODE model - training data
-    df_results_train = DataFrame(Date = train_dates, 
-                        y_obs = train_y,
-                        y_sim = Q_sim_train)
+    # # Save the model results for the Neural ODE model - training data
+    # df_results_train = DataFrame(Date = train_dates, 
+    #                     y_obs = train_y,
+    #                     y_sim = Q_sim_train)
 
-    # Save the DataFrame as a CSV file in the results directory
-    results_file_train = joinpath(m100_results_path, "$(basin_id)_results_train.csv")    
+    # # Save the DataFrame as a CSV file in the results directory
+    # results_file_train = joinpath(m100_results_path, "$(basin_id)_results_train.csv")    
     
-    CSV.write(results_file_train, df_results_train)
+    # CSV.write(results_file_train, df_results_train)
 
-    # Save the model results for the Neural ODE model - testing data
-    df_results_test = DataFrame(Date = test_dates, 
-                        y_obs = test_y,
-                        y_sim = Q_sim_test)
+    # # Save the model results for the Neural ODE model - testing data
+    # df_results_test = DataFrame(Date = test_dates, 
+    #                     y_obs = test_y,
+    #                     y_sim = Q_sim_test)
 
-    # Save the DataFrame as a CSV file in the results directory
-    results_file_test = joinpath(m100_results_path, "$(basin_id)_results_test.csv")
+    # # Save the DataFrame as a CSV file in the results directory
+    # results_file_test = joinpath(m100_results_path, "$(basin_id)_results_test.csv")
 
-    CSV.write(results_file_test, df_results_test)
+    # CSV.write(results_file_test, df_results_test)
 
-    @info "Results saved in $m100_results_path"
+    # @info "Results saved in $m100_results_path"
 
-    # Store the basin metrics in the basin_metrics_list_m100
-    NSE_NODE_train = -NSE_loss(pred_NODE_model, p_opt_NODE, train_y, train_timepoints)[1]
-    NSE_NODE_test = -NSE_loss(pred_NODE_model, p_opt_NODE, test_y, test_timepoints)[1]
+    # # Store the basin metrics in the basin_metrics_list_m100
+    # NSE_NODE_train = -NSE_loss(pred_NODE_model, p_opt_NODE, train_y, train_timepoints)[1]
+    # NSE_NODE_test = -NSE_loss(pred_NODE_model, p_opt_NODE, test_y, test_timepoints)[1]
 
-    push!(basin_metrics_list_m100, BasinMetrics(basin_id, NSE_NODE_train, NSE_NODE_test))
+    # push!(basin_metrics_list_m100, BasinMetrics(basin_id, NSE_NODE_train, NSE_NODE_test))
 
-    @info "NSE NODE model (train): $(Printf.@sprintf("%.5f", NSE_NODE_train))"
-    @info "NSE NODE model (test) : $(Printf.@sprintf("%.5f", NSE_NODE_test))"
+    # @info "NSE NODE model (train): $(Printf.@sprintf("%.5f", NSE_NODE_train))"
+    # @info "NSE NODE model (test) : $(Printf.@sprintf("%.5f", NSE_NODE_test))"
 
     # ===============================================================
 
 ##################################################
 end
 
-# Convert the list of BasinMetrics to a DataFrame - M0
+## Convert the list of BasinMetrics to a DataFrame - M0
 metrics_df_M0 = DataFrame(basin_id = [bm.basin_id for bm in basin_metrics_list_m0],
                        NSE_train = [bm.NSE_train for bm in basin_metrics_list_m0],
                        NSE_test = [bm.NSE_test for bm in basin_metrics_list_m0])
 
-# # Save the DataFrame as a CSV file in the results directory
-if USING_BATCH
-    metrics_file_M0 = get_versioned_filename(joinpath(m0_outputs_path, "model_metrics_batch1.csv"))
-else
-    metrics_file_M0 = joinpath(m0_outputs_path, "model_metrics.csv")
-end
+# Sort the DataFrame by the basin_id
+sort!(metrics_df_M0, :basin_id)
+
+# Save the DataFrame as a CSV file in the results directory
+metrics_file_M0 = joinpath(m0_outputs_path, "model_metrics.csv")
 CSV.write(metrics_file_M0, metrics_df_M0)
 
-# Convert the list of BasinMetrics to a DataFrame - Pretrainer
+## Convert the list of BasinMetrics to a DataFrame - Pretrainer
 metrics_df_pretrainer = DataFrame(basin_id = [bm.basin_id for bm in basin_metrics_list_pretrainer],
                        NSE_train = [bm.NSE_train for bm in basin_metrics_list_pretrainer],
                        NSE_test = [bm.NSE_test for bm in basin_metrics_list_pretrainer])
 
+# Sort the DataFrame by the basin_id
+sort!(metrics_df_pretrainer, :basin_id)
+
 # Save the DataFrame as a CSV file in the results directory
-if USING_BATCH
-    metrics_file_pretrainer = get_versioned_filename(joinpath(m100_outputs_path, "model_metrics_pretrainer_batch1.csv"))
-else
-    metrics_file_pretrainer = joinpath(m100_outputs_path, "model_metrics_pretrainer.csv")
-end
+metrics_file_pretrainer = joinpath(m100_outputs_path, "model_metrics_pretrainer.csv")
+
 CSV.write(metrics_file_pretrainer, metrics_df_pretrainer)
 
-# Convert the list of BasinMetrics to a DataFrame - M100
-metrics_df_M100 = DataFrame(basin_id = [bm.basin_id for bm in basin_metrics_list_m100],
-                       NSE_train = [bm.NSE_train for bm in basin_metrics_list_m100],
-                       NSE_test = [bm.NSE_test for bm in basin_metrics_list_m100])
+# ## Convert the list of BasinMetrics to a DataFrame - M100
+# metrics_df_M100 = DataFrame(basin_id = [bm.basin_id for bm in basin_metrics_list_m100],
+#                        NSE_train = [bm.NSE_train for bm in basin_metrics_list_m100],
+#                        NSE_test = [bm.NSE_test for bm in basin_metrics_list_m100])
 
-# Save the DataFrame as a CSV file in the results directory
-if USING_BATCH
-    metrics_file_M100 = get_versioned_filename(joinpath(m100_outputs_path, "model_metrics_node_batch1.csv"))
-else
-    metrics_file_M100 = joinpath(m100_outputs_path, "model_metrics_node.csv")
-end
-CSV.write(metrics_file_M100, metrics_df_M100)
+# # Sort the DataFrame by the basin_id
+# sort!(metrics_df_M100, :basin_id)
+
+# # Save the DataFrame as a CSV file in the results directory
+# metrics_file_M100 = joinpath(m100_outputs_path, "model_metrics_node.csv")
+
+# CSV.write(metrics_file_M100, metrics_df_M100)
+
+
+
+
