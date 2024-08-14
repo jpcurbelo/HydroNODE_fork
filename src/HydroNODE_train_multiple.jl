@@ -55,19 +55,19 @@ chosen_model_id = "M100"
 
 # choose basin id
 # Load the basin list from ../param_set_files
-# basin_file_name = "569_basin_file.txt"
+basin_file_name = "569_basin_file.txt"
 # basin_file_name = "569_basin_file_16f.txt"
 # basin_file_name = "569_basin_file_3f.txt"
-basin_file_name = "2_basin_file.txt"
+# basin_file_name = "2_basin_file.txt"
 basin_file = joinpath(project_path, "param_set_files", basin_file_name)
 basin_list = readlines(basin_file)
 # println(basin_list)
 
 # Results directory names
-# m0_folder = "M0_results_569basins_1980_2010_BS3_julia"
+m0_folder = "M0_results_569basins_1980_2010_BS3_julia"
 # m0_folder = "M0_results_16basins"
 # m0_folder = "M0_results_3basins"
-m0_folder = "M0_results_2basin"
+# m0_folder = "M0_results_2basin"
 
 m0_outputs_path = joinpath(project_path, m0_folder)
 if !isdir(m0_outputs_path)
@@ -79,14 +79,14 @@ if !isdir(m0_results_path)
 end
 
 # Define the maximum number of iterations and the callback frequency for the training 
-MAX_N_ITER = 2
-CALLBACK_FREQ = 1
+MAX_N_ITER = 150
+CALLBACK_FREQ = 10
 LR_TRAIN = 0.0001  # Hoge value is 0.0001
 
-# m100_folder = "$(chosen_model_id)_results_569basins_1980_2010_BS3_julia_$(MAX_N_ITER)ep"
-# m100_folder = "$(chosen_model_id)_results_16basins"
+m100_folder = "$(chosen_model_id)_results_569basins_1980_2010_BS3_julia_$(MAX_N_ITER)ep_lr4"
+# m100_folder = "$(chosen_model_id)_results_16basins_$(MAX_N_ITER)ep_lr4"
 # m100_folder = "$(chosen_model_id)_results_3basins"
-m100_folder = "$(chosen_model_id)_results_2basin_$(MAX_N_ITER)ep_lr4"
+# m100_folder = "$(chosen_model_id)_results_2basin_$(MAX_N_ITER)ep_lr4"
 
 m100_outputs_path = joinpath(project_path, m100_folder)
 if !isdir(m100_outputs_path)
@@ -98,15 +98,15 @@ if !isdir(m100_results_path)
 end
 
 # define training and testing period
-train_start_date = Date(1995,10,01)
-train_stop_date = Date(2000,09,30)
-test_start_date = Date(2000,10,01)
-test_stop_date = Date(2005,09,30)
-
-# train_start_date = Date(1980,10,01)
+# train_start_date = Date(1995,10,01)
 # train_stop_date = Date(2000,09,30)
 # test_start_date = Date(2000,10,01)
-# test_stop_date = Date(2010,09,30)
+# test_stop_date = Date(2005,09,30)
+
+train_start_date = Date(1980,10,01)
+train_stop_date = Date(2000,09,30)
+test_start_date = Date(2000,10,01)
+test_stop_date = Date(2010,09,30)
 
 # ===========================================================
 includet("HydroNODE_data.jl")
@@ -176,9 +176,18 @@ basin_metrics_list_m100 = []
 ##################################################
 
 USING_BATCH = true
+batch1 = basin_list[1:70]
+batch2 = basin_list[71:140]
+batch3 = basin_list[141:210]
+batch4 = basin_list[211:280]
+batch5 = basin_list[281:350]
+batch6 = basin_list[351:420]
+batch7 = basin_list[421:490]
+batch8 = basin_list[491:end]  # Or basin_list[491:569]
 # -------------------------------------------------------
 # Loop over basins
-for basin_id in basin_list[1:2]
+# for basin_id in basin_list
+for basin_id in batch8
 
     println("="^80)
     println("Basin: ", basin_id)
