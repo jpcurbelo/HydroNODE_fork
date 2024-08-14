@@ -30,6 +30,10 @@ using Pkg; Pkg.activate(".."); Pkg.instantiate()
 @time Random.seed!(123)
 
 @time using Printf
+# @time using Base.Threads
+
+# # # Define a constant for the number of threads
+# # const NUM_THREADS = 4  # or any number you desire
 
 @info "Loading packages complete"
 
@@ -47,15 +51,20 @@ chosen_model_id = "M100"
 
 # choose basin id
 # Load the basin list from ../param_set_files
+# basin_file_name = "569_basin_file.txt"
+# basin_file_name = "569_basin_file_16f.txt"
 # basin_file_name = "569_basin_file_3f.txt"
-basin_file_name = "569_basin_file.txt"
+basin_file_name = "2_basin_file.txt"
 basin_file = joinpath(project_path, "param_set_files", basin_file_name)
 basin_list = readlines(basin_file)
-println(basin_list)
+# println(basin_list)
 
 # Results directory names
+# m0_folder = "M0_results_569basins_1980_2010_BS3_julia"
+# m0_folder = "M0_results_16basins"
 # m0_folder = "M0_results_3basins"
-m0_folder = "M0_results_569basins_1980_2010_BS3_julia"
+m0_folder = "M0_results_2basin"
+
 m0_outputs_path = joinpath(project_path, m0_folder)
 if !isdir(m0_outputs_path)
     mkdir(m0_outputs_path)
@@ -66,11 +75,15 @@ if !isdir(m0_results_path)
 end
 
 # Define the maximum number of iterations and the callback frequency for the training 
-MAX_N_ITER = 100
-CALLBACK_FREQ = 20
+MAX_N_ITER = 5
+CALLBACK_FREQ = 1
+LR_TRAIN = 0.001  # Hoge value is 0.0001
 
+# m100_folder = "$(chosen_model_id)_results_569basins_1980_2010_BS3_julia_$(MAX_N_ITER)ep"
+# m100_folder = "$(chosen_model_id)_results_16basins"
 # m100_folder = "$(chosen_model_id)_results_3basins"
-m100_folder = "$(chosen_model_id)_results_569basins_1980_2010_BS3_julia_$(MAX_N_ITER)ep"
+m100_folder = "$(chosen_model_id)_results_2basin_$(MAX_N_ITER)ep_lr3_parallel"
+
 m100_outputs_path = joinpath(project_path, m100_folder)
 if !isdir(m100_outputs_path)
     mkdir(m100_outputs_path)
@@ -110,6 +123,21 @@ function NSE_loss(pred_model, params, batch, time_batch)
     return loss, pred
 end
 
+# # # Define the normalization function
+# # function perform_normalization(norm_moments_in)
+# #     norm_P = prep_norm(norm_moments_in[:,2])
+# #     norm_T = prep_norm(norm_moments_in[:,3])
+# #     return norm_P, norm_T
+# # end
+
+# # # Define the interpolation function
+# # function perform_interpolation(data_timepoints, data_x, itp_method)
+# #     itp_Lday = interpolate(data_timepoints, data_x[:,1], itp_method)
+# #     itp_P = interpolate(data_timepoints, data_x[:,2], itp_method)
+# #     itp_T = interpolate(data_timepoints, data_x[:,3], itp_method)
+# #     return itp_Lday, itp_P, itp_T
+# # end
+
 
 # Struct to store basin metrics
 struct BasinMetrics
@@ -124,6 +152,7 @@ basin_metrics_list_m100 = []
 # -------------------------------------------------------
 # Loop over basins
 for basin_id in basin_list
+# Threads.@threads for basin_id in basin_list
 
     println("="^80)
     println("Basin: ", basin_id)
@@ -194,6 +223,8 @@ for basin_id in basin_list
     p_bucket_precalib = p_all_opt_bucket[3:8]
 
     @info "Solving the bucket model for the training and testing data..."
+    start_time_concept = time_ns()
+
     # Solve the bucket model for the training data
     Q_bucket, S_bucket  = basic_bucket_incl_states([S_bucket_precalib..., p_bucket_precalib...], train_timepoints)
 
@@ -243,7 +274,9 @@ for basin_id in basin_list
     # Store the basin metrics in the basin_metrics_list_m0
     push!(basin_metrics_list_m0, BasinMetrics(basin_id, NSE_opt_bucket, NSE_opt_bucket_test))
 
-    @info "... complete!"
+    elapsed_time_ns_concept = time_ns() - start_time_concept
+    elapsed_time_s_concept = elapsed_time_ns_concept / 1e9  # Convert nanoseconds to seconds
+    @info "... completed in $(Printf.@sprintf("%.2f", elapsed_time_s_concept)) s"
 
     # ===============================================================
     # Neural ODE models
@@ -272,9 +305,14 @@ for basin_id in basin_list
 
     
     @info "NN pre-training..."
+    start_time_pretrain = time_ns()
+
     p_NN_init = pretrain_NNs_for_bucket_processes(chosen_model_id, NN_NODE, p_NN_init,
         NN_input, p_bucket_precalib, S0_bucket_, S1_bucket_, Lday_bucket_, P_bucket_, T_bucket_)
-    @info "... complete!"
+
+    elapsed_time_ns_pretrain =  time_ns() - start_time_pretrain
+    elapsed_time_s_pretrain = elapsed_time_ns_pretrain / 1e9  # Convert nanoseconds to seconds
+    @info "... completed in $(Printf.@sprintf("%.2f", elapsed_time_s_pretrain)) s"
 
     # Train set
     pred_NODE_model= prep_pred_NODE(NN_NODE, p_bucket_precalib[6:-1:4], S_bucket_precalib, length.(p_NN_init)[1])
@@ -295,8 +333,14 @@ for basin_id in basin_list
     # training
 
     @info "Neural ODE model training..."
-    p_opt_NODE = train_model(pred_NODE_model, p_NN_init, train_y, train_timepoints; optmzr = ADAM(0.0001), max_N_iter = MAX_N_ITER, callback_freq = CALLBACK_FREQ)
-    @info "... complete."
+    start_time_train = time_ns()
+
+    p_opt_NODE = train_model(pred_NODE_model, p_NN_init, train_y, train_timepoints; optmzr = ADAM(LR_TRAIN), max_N_iter = MAX_N_ITER, callback_freq = CALLBACK_FREQ)
+    
+    elapsed_time_ns_train = time_ns() - start_time_train
+    elapsed_time_s_train = elapsed_time_ns_train / 1e9  # Convert nanoseconds to seconds
+    @info "... completed in $(Printf.@sprintf("%.2f", elapsed_time_s_train)) s"
+
 
     Q_NODE_train = pred_NODE_model(p_opt_NODE, train_timepoints)
     Q_sim_train = Q_NODE_train[1]
@@ -331,8 +375,8 @@ for basin_id in basin_list
 
     push!(basin_metrics_list_m100, BasinMetrics(basin_id, NSE_NODE_train, NSE_NODE_test))
 
-    @info "NSE NeuralODE model (train): $(Printf.@sprintf("%.5f", NSE_NODE_train))"
-    @info "NSE NeuralODE model (test) : $(Printf.@sprintf("%.5f", NSE_NODE_test))"
+    @info "NSE NODE model (train): $(Printf.@sprintf("%.5f", NSE_NODE_train))"
+    @info "NSE NODE model (test) : $(Printf.@sprintf("%.5f", NSE_NODE_test))"
 
     # ===============================================================
 

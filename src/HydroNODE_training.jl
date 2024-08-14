@@ -107,8 +107,6 @@ end
 
 function train_model(pred_NODE, p_init, target_data, target_time; optmzr = ADAM(0.01), max_N_iter = 75, callback_freq = 1)
 
-  epoch = 0  # Initialize epoch counter
-
   function prep_pred_model(time_batch)
       (p) -> pred_NODE(p, time_batch)[1]
   end
@@ -119,14 +117,26 @@ function train_model(pred_NODE, p_init, target_data, target_time; optmzr = ADAM(
       -NSE(pred_NN_model_fct(p),target_data)
   end
 
-  callback = function (p, l) 
+  # Initial setup
+  epoch = 1  # Initialize epoch counter
+  last_call_time = time_ns()  # Record the initial time
+
+  callback = function (p, l)
     # Call the callback every N epochs (and at epoch 1)
-    if epoch % callback_freq == 0 || epoch == 0
-        # println("Epoch $epoch | NSE: "*string(-l))
-        println("Epoch $epoch | NSE (train): $(Printf.@sprintf("%.5f", -l))")
+    if (epoch % callback_freq == 0 || epoch == 1) && epoch <= max_N_iter 
+        # Calculate the elapsed time since the last call
+        current_time = time_ns()
+        elapsed_time_ns = current_time - last_call_time
+        elapsed_time_s = elapsed_time_ns / 1e9  # Convert nanoseconds to seconds
+        
+        # Print the elapsed time and other information
+        println("Epoch $epoch | NSE (train): $(Printf.@sprintf("%.5f", -l)) (elapsed time: $(Printf.@sprintf("%.2f", elapsed_time_s)) s)")
+        
+        # Update the last call time
+        last_call_time = time_ns()
     end
+    
     epoch += 1  # Increment epoch counter
-    # println("NSE: "*string(-l))
     return false
   end
 
