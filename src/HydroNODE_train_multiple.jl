@@ -7,6 +7,9 @@
 cd(@__DIR__)
 using Pkg; Pkg.activate(".."); Pkg.instantiate()
 
+# Perform garbage collection
+Pkg.gc()
+
 # # Add the required package
 # Pkg.add("FilePathsBase")
 
@@ -65,6 +68,8 @@ basin_list = readlines(basin_file)
 
 # Results directory names
 m0_folder = "M0_results_569basins_1980_2010_BS3_julia"
+# m0_folder = "M0_results_569basins_1980_2010_BS3tol69_julia"
+# m0_folder = "M0_results_569basins_1980_2010_DP5tol912_julia"
 # m0_folder = "M0_results_16basins"
 # m0_folder = "M0_results_3basins"
 # m0_folder = "M0_results_2basin"
@@ -87,6 +92,9 @@ m100_folder = "$(chosen_model_id)_results_569basins_1980_2010_BS3_julia_$(MAX_N_
 # m100_folder = "$(chosen_model_id)_results_16basins_$(MAX_N_ITER)ep_lr4"
 # m100_folder = "$(chosen_model_id)_results_3basins"
 # m100_folder = "$(chosen_model_id)_results_2basin_$(MAX_N_ITER)ep_lr4"
+
+RUN_PRETRAIN = true
+RUN_TRAIN = true
 
 m100_outputs_path = joinpath(project_path, m100_folder)
 if !isdir(m100_outputs_path)
@@ -173,8 +181,38 @@ end
 basin_metrics_list_m0 = []
 basin_metrics_list_pretrainer = []
 basin_metrics_list_m100 = []
-##################################################
 
+# Helper function to find basins that need to be processed
+function find_basins_todo(basin_list, m100_results_path)
+
+    basins_todo = []
+
+    for basin_id in basin_list
+        results_file_m100_train = joinpath(m100_results_path, "$(basin_id)_results_train.csv")
+        results_file_m100_test = joinpath(m100_results_path, "$(basin_id)_results_test.csv")
+
+        # Check if both files exist
+        train_exists = isfile(results_file_m100_train)
+        test_exists = isfile(results_file_m100_test)
+
+        if !(train_exists && test_exists)
+            if train_exists && !test_exists
+                @warn "Train file exists but test file is missing for basin $basin_id. Deleting train file..."
+                rm(results_file_m100_train)
+            elseif !train_exists && test_exists
+                @warn "Test file exists but train file is missing for basin $basin_id. Deleting test file..."
+                rm(results_file_m100_test)
+            end
+            push!(basins_todo, basin_id)
+        else
+            @info "Results files for basin $basin_id already exist. Skipping..."
+        end
+    end
+
+    return basins_todo
+end
+
+#########################################################
 USING_BATCH = true
 batch1 = basin_list[1:70]
 batch2 = basin_list[71:140]
@@ -184,10 +222,37 @@ batch5 = basin_list[281:350]
 batch6 = basin_list[351:420]
 batch7 = basin_list[421:490]
 batch8 = basin_list[491:end]  # Or basin_list[491:569]
+
+# Find the basins that need to be processed
+basins_todo = find_basins_todo(basin_list, m100_results_path)
+@info "Basins to process: $(length(basins_todo))"
+
+# println("Pausing for 60 seconds...")
+# sleep(60)
+# println("Resumed after pause.")
+#########################################################
 # -------------------------------------------------------
+# Session 1: Indices 1:45
+# Session 2: Indices 46:90
+# Session 3: Indices 91:135
+# Session 4: Indices 136:180
+# Session 5: Indices 181:225
+# Session 6: Indices 226:270
+# Session 7: Indices 271:315
+# Session 8: Indices 316:end
+
 # Loop over basins
 # for basin_id in basin_list
-for basin_id in batch8
+for basin_id in basins_todo[316:end]
+
+    results_file_m100_train = joinpath(m100_results_path, "$(basin_id)_results_train.csv")    
+    results_file_m100_test = joinpath(m100_results_path, "$(basin_id)_results_test.csv")
+
+    # Check if results file exists
+    if isfile(results_file_m100_train) && isfile(results_file_m100_test)
+        @info "Results file for basin $basin_id already exists. Skipping..."
+        continue
+    end
 
     println("="^80)
     println("Basin: ", basin_id)
@@ -284,9 +349,8 @@ for basin_id in batch8
                         s1 = S_bucket[2, :])
 
     # Save the DataFrame as a CSV file in the results directory
-    results_file = joinpath(m0_results_path, "$(basin_id)_results_train.csv")
-
-    CSV.write(results_file, df_results)
+    results_file_m0_train = joinpath(m0_results_path, "$(basin_id)_results_train.csv")
+    CSV.write(results_file_m0_train, df_results)
 
     df_results_test = DataFrame(Date = test_dates, 
                         q_bucket = Q_bucket_test, 
@@ -295,9 +359,8 @@ for basin_id in batch8
                         s1 = S_bucket_test[2, :])
 
     # Save the DataFrame as a CSV file in the results directory
-    results_file_test = joinpath(m0_results_path, "$(basin_id)_results_test.csv")
-
-    CSV.write(results_file_test, df_results_test)
+    results_file_m0_test = joinpath(m0_results_path, "$(basin_id)_results_test.csv")
+    CSV.write(results_file_m0_test, df_results_test)
 
     # Calculate Nash-Sutcliffe-Efficiency for the bucket model
     NSE_opt_bucket = -NSE_loss_bucket_w_states(p_all_opt_bucket)
@@ -330,79 +393,78 @@ for basin_id in batch8
 
     NN_input = [norm_S0.(S0_bucket_) norm_S1.(S1_bucket_) norm_P.(P_bucket_) norm_T.(T_bucket_)]
    
-    @info "NN pre-training..."
-    start_time_pretrain = time_ns()
+    if RUN_PRETRAIN
+        @info "NN pre-training..."
+        start_time_pretrain = time_ns()
 
-    p_NN_init = pretrain_NNs_for_bucket_processes(chosen_model_id, NN_NODE, p_NN_init,
-        NN_input, p_bucket_precalib, S0_bucket_, S1_bucket_, Lday_bucket_, P_bucket_, T_bucket_)
+        p_NN_init = pretrain_NNs_for_bucket_processes(chosen_model_id, NN_NODE, p_NN_init,
+            NN_input, p_bucket_precalib, S0_bucket_, S1_bucket_, Lday_bucket_, P_bucket_, T_bucket_)
 
-    elapsed_time_ns_pretrain =  time_ns() - start_time_pretrain
-    elapsed_time_s_pretrain = elapsed_time_ns_pretrain / 1e9  # Convert nanoseconds to seconds
-    @info "... completed in $(Printf.@sprintf("%.2f", elapsed_time_s_pretrain)) s"
+        elapsed_time_ns_pretrain =  time_ns() - start_time_pretrain
+        elapsed_time_s_pretrain = elapsed_time_ns_pretrain / 1e9  # Convert nanoseconds to seconds
+        @info "... completed in $(Printf.@sprintf("%.2f", elapsed_time_s_pretrain)) s"
 
-    # Train set
-    pred_NODE_model= prep_pred_NODE(NN_NODE, p_bucket_precalib[6:-1:4], S_bucket_precalib, length.(p_NN_init)[1])
+        # Train set
+        pred_NODE_model= prep_pred_NODE(NN_NODE, p_bucket_precalib[6:-1:4], S_bucket_precalib, length.(p_NN_init)[1])
 
-    NSE_init_NODE = -NSE_loss(pred_NODE_model,p_NN_init, train_y, train_timepoints)[1]
-    @info "NSE NODE init (train): $(Printf.@sprintf("%.5f", NSE_init_NODE))"
+        NSE_init_NODE = -NSE_loss(pred_NODE_model,p_NN_init, train_y, train_timepoints)[1]
+        @info "NSE NODE init (train): $(Printf.@sprintf("%.5f", NSE_init_NODE))"
 
-    # Test set
-    pred_NODE_model_test= prep_pred_NODE(NN_NODE, p_bucket_precalib[6:-1:4], S_bucket_precalib_test, length.(p_NN_init)[1])
+        # Test set
+        pred_NODE_model_test= prep_pred_NODE(NN_NODE, p_bucket_precalib[6:-1:4], S_bucket_precalib_test, length.(p_NN_init)[1])
 
-    NSE_init_NODE_test = -NSE_loss(pred_NODE_model_test,p_NN_init, test_y, test_timepoints)[1]
-    @info "NSE NODE init (test) : $(Printf.@sprintf("%.5f", NSE_init_NODE_test))"
+        NSE_init_NODE_test = -NSE_loss(pred_NODE_model_test,p_NN_init, test_y, test_timepoints)[1]
+        @info "NSE NODE init (test) : $(Printf.@sprintf("%.5f", NSE_init_NODE_test))"
 
-    # Store the basin metrics in the basin_metrics_list_pretrainer
-    push!(basin_metrics_list_pretrainer, BasinMetrics(basin_id, NSE_init_NODE, NSE_init_NODE_test))
+        # Store the basin metrics in the basin_metrics_list_pretrainer
+        push!(basin_metrics_list_pretrainer, BasinMetrics(basin_id, NSE_init_NODE, NSE_init_NODE_test))
+    end
 
     # -------------
     # training
+    if RUN_TRAIN
+        @info "Neural ODE model training..."
+        start_time_train = time_ns()
 
-    @info "Neural ODE model training..."
-    start_time_train = time_ns()
-
-    p_opt_NODE = train_model(pred_NODE_model, p_NN_init, train_y, train_timepoints; optmzr = ADAM(LR_TRAIN), max_N_iter = MAX_N_ITER, callback_freq = CALLBACK_FREQ)
-    
-    elapsed_time_ns_train = time_ns() - start_time_train
-    elapsed_time_s_train = elapsed_time_ns_train / 1e9  # Convert nanoseconds to seconds
-    @info "... completed in $(Printf.@sprintf("%.2f", elapsed_time_s_train)) s"
+        p_opt_NODE = train_model(pred_NODE_model, p_NN_init, train_y, train_timepoints; optmzr = ADAM(LR_TRAIN), max_N_iter = MAX_N_ITER, callback_freq = CALLBACK_FREQ)
+        
+        elapsed_time_ns_train = time_ns() - start_time_train
+        elapsed_time_s_train = elapsed_time_ns_train / 1e9  # Convert nanoseconds to seconds
+        @info "... completed in $(Printf.@sprintf("%.2f", elapsed_time_s_train)) s"
 
 
-    Q_NODE_train = pred_NODE_model(p_opt_NODE, train_timepoints)
-    Q_sim_train = Q_NODE_train[1]
-    Q_NODE_test = pred_NODE_model(p_opt_NODE, test_timepoints)
-    Q_sim_test = Q_NODE_test[1]
+        Q_NODE_train = pred_NODE_model(p_opt_NODE, train_timepoints)
+        Q_sim_train = Q_NODE_train[1]
+        Q_NODE_test = pred_NODE_model(p_opt_NODE, test_timepoints)
+        Q_sim_test = Q_NODE_test[1]
 
-    # Save the model results for the Neural ODE model - training data
-    df_results_train = DataFrame(Date = train_dates, 
-                        y_obs = train_y,
-                        y_sim = Q_sim_train)
+        # Save the model results for the Neural ODE model - training data
+        df_results_train = DataFrame(Date = train_dates, 
+                            y_obs = train_y,
+                            y_sim = Q_sim_train)
 
-    # Save the DataFrame as a CSV file in the results directory
-    results_file_train = joinpath(m100_results_path, "$(basin_id)_results_train.csv")    
-    
-    CSV.write(results_file_train, df_results_train)
+        # Save the DataFrame as a CSV file in the results directory       
+        CSV.write(results_file_m100_train, df_results_train)
 
-    # Save the model results for the Neural ODE model - testing data
-    df_results_test = DataFrame(Date = test_dates, 
-                        y_obs = test_y,
-                        y_sim = Q_sim_test)
+        # Save the model results for the Neural ODE model - testing data
+        df_results_test = DataFrame(Date = test_dates, 
+                            y_obs = test_y,
+                            y_sim = Q_sim_test)
 
-    # Save the DataFrame as a CSV file in the results directory
-    results_file_test = joinpath(m100_results_path, "$(basin_id)_results_test.csv")
+        # Save the DataFrame as a CSV file in the results directory
+        CSV.write(results_file_m100_test, df_results_test)
 
-    CSV.write(results_file_test, df_results_test)
+        @info "Results saved in $m100_results_path"
 
-    @info "Results saved in $m100_results_path"
+        # Store the basin metrics in the basin_metrics_list_m100
+        NSE_NODE_train = -NSE_loss(pred_NODE_model, p_opt_NODE, train_y, train_timepoints)[1]
+        NSE_NODE_test = -NSE_loss(pred_NODE_model, p_opt_NODE, test_y, test_timepoints)[1]
 
-    # Store the basin metrics in the basin_metrics_list_m100
-    NSE_NODE_train = -NSE_loss(pred_NODE_model, p_opt_NODE, train_y, train_timepoints)[1]
-    NSE_NODE_test = -NSE_loss(pred_NODE_model, p_opt_NODE, test_y, test_timepoints)[1]
+        push!(basin_metrics_list_m100, BasinMetrics(basin_id, NSE_NODE_train, NSE_NODE_test))
 
-    push!(basin_metrics_list_m100, BasinMetrics(basin_id, NSE_NODE_train, NSE_NODE_test))
-
-    @info "NSE NODE model (train): $(Printf.@sprintf("%.5f", NSE_NODE_train))"
-    @info "NSE NODE model (test) : $(Printf.@sprintf("%.5f", NSE_NODE_test))"
+        @info "NSE NODE model (train): $(Printf.@sprintf("%.5f", NSE_NODE_train))"
+        @info "NSE NODE model (test) : $(Printf.@sprintf("%.5f", NSE_NODE_test))"
+    end
 
     # ===============================================================
 
@@ -422,28 +484,32 @@ else
 end
 CSV.write(metrics_file_M0, metrics_df_M0)
 
-# Convert the list of BasinMetrics to a DataFrame - Pretrainer
-metrics_df_pretrainer = DataFrame(basin_id = [bm.basin_id for bm in basin_metrics_list_pretrainer],
-                       NSE_train = [bm.NSE_train for bm in basin_metrics_list_pretrainer],
-                       NSE_test = [bm.NSE_test for bm in basin_metrics_list_pretrainer])
+if RUN_PRETRAIN
+    # Convert the list of BasinMetrics to a DataFrame - Pretrainer
+    metrics_df_pretrainer = DataFrame(basin_id = [bm.basin_id for bm in basin_metrics_list_pretrainer],
+                        NSE_train = [bm.NSE_train for bm in basin_metrics_list_pretrainer],
+                        NSE_test = [bm.NSE_test for bm in basin_metrics_list_pretrainer])
 
-# Save the DataFrame as a CSV file in the results directory
-if USING_BATCH
-    metrics_file_pretrainer = get_versioned_filename(joinpath(m100_outputs_path, "model_metrics_pretrainer_batch1.csv"))
-else
-    metrics_file_pretrainer = joinpath(m100_outputs_path, "model_metrics_pretrainer.csv")
+    # Save the DataFrame as a CSV file in the results directory
+    if USING_BATCH
+        metrics_file_pretrainer = get_versioned_filename(joinpath(m100_outputs_path, "model_metrics_pretrainer_batch1.csv"))
+    else
+        metrics_file_pretrainer = joinpath(m100_outputs_path, "model_metrics_pretrainer.csv")
+    end
+    CSV.write(metrics_file_pretrainer, metrics_df_pretrainer)
 end
-CSV.write(metrics_file_pretrainer, metrics_df_pretrainer)
 
-# Convert the list of BasinMetrics to a DataFrame - M100
-metrics_df_M100 = DataFrame(basin_id = [bm.basin_id for bm in basin_metrics_list_m100],
-                       NSE_train = [bm.NSE_train for bm in basin_metrics_list_m100],
-                       NSE_test = [bm.NSE_test for bm in basin_metrics_list_m100])
+if RUN_TRAIN
+    # Convert the list of BasinMetrics to a DataFrame - M100
+    metrics_df_M100 = DataFrame(basin_id = [bm.basin_id for bm in basin_metrics_list_m100],
+                        NSE_train = [bm.NSE_train for bm in basin_metrics_list_m100],
+                        NSE_test = [bm.NSE_test for bm in basin_metrics_list_m100])
 
-# Save the DataFrame as a CSV file in the results directory
-if USING_BATCH
-    metrics_file_M100 = get_versioned_filename(joinpath(m100_outputs_path, "model_metrics_node_batch1.csv"))
-else
-    metrics_file_M100 = joinpath(m100_outputs_path, "model_metrics_node.csv")
+    # Save the DataFrame as a CSV file in the results directory
+    if USING_BATCH
+        metrics_file_M100 = get_versioned_filename(joinpath(m100_outputs_path, "model_metrics_node_batch1.csv"))
+    else
+        metrics_file_M100 = joinpath(m100_outputs_path, "model_metrics_node.csv")
+    end
+    CSV.write(metrics_file_M100, metrics_df_M100)
 end
-CSV.write(metrics_file_M100, metrics_df_M100)

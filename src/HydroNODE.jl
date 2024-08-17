@@ -13,6 +13,9 @@ cd(@__DIR__)
 ## Uncomment this to run this module - it was commented out to run the parallel version HydroNODE_train_multiple.jl
 # using Pkg; Pkg.activate(".."); Pkg.instantiate()
 
+# Perform garbage collection
+Pkg.gc()
+
 using Revise
 
 using DataFrames, Dates, Statistics

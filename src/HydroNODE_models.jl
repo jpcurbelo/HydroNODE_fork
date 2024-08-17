@@ -186,6 +186,7 @@ function NeuralODE_M100(p, t_out, ann, args...; S_init = [0.0, 0.0])
     prob = ODEProblem(NeuralODE_M100_core!, S_init, Float64.((t_out[1], maximum(t_out))), p)
 
     sol = solve(prob, BS3(), dt=1.0, saveat=t_out, reltol=1e-3, abstol=1e-3, sensealg=BacksolveAdjoint(autojacvec=ZygoteVJP()))
+    # sol = solve(prob, DP5(), dt=1.0, saveat=t_out, reltol=1e-9, abstol=1e-12, sensealg=BacksolveAdjoint(autojacvec=ZygoteVJP()))
 
     P_interp = norm_P.(itp_P.(t_out))
     T_interp = norm_T.(itp_T.(t_out))
